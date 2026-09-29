@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>考务管理 - 公务员面试打分系统</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">公务员面试打分系统 · 考务管理</div>
+  <div class="user">
+    <span id="userInfo"></span>
+    <button class="btn btn-sm btn-light" onclick="logout()">退出登录</button>
+  </div>
+</header>
+
+<main class="container" style="max-width:1200px">
+  <div class="staff-tabs">
+    <button class="tab active" data-tab="candidates" onclick="switchTab('candidates')">考生管理</button>
+    <button class="tab" data-tab="examiners" onclick="switchTab('examiners')">考官与回避</button>
+    <button class="tab" data-tab="results" onclick="switchTab('results')">成绩管理</button>
+    <button class="tab" data-tab="appeals" onclick="switchTab('appeals')">申诉处理</button>
+  </div>
+
+  <!-- ========== 考生管理 ========== -->
+  <div id="panel-candidates" class="tab-panel">
+    <div class="card">
+      <div class="card-title">添加考生</div>
+      <div id="addAlert"></div>
+      <div class="form-inline">
+        <div class="form-group"><label>姓名</label><input id="addName" placeholder="考生姓名"></div>
+        <div class="form-group"><label>准考证号</label><input id="addNum" placeholder="如 2026019"></div>
+        <div class="form-group"><label>面试组</label><select id="addGroup"></select></div>
+        <button class="btn btn-primary" onclick="addCandidate()">添加考生</button>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">考生名单（缺考标记 / 换组调整）</div>
+      <table class="table">
+        <thead>
+          <tr><th>准考证号</th><th>姓名</th><th>报考职位</th><th>面试组</th><th>状态</th><th>已评分数</th><th style="width:340px">操作</th></tr>
+        </thead>
+        <tbody id="candTbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ========== 考官与回避 ========== -->
+  <div id="panel-examiners" class="tab-panel hidden">
+    <div class="card">
+      <div class="card-title">考官名单</div>
+      <div id="exAlert"></div>
+      <div class="form-inline" style="margin-bottom:14px">
+        <div class="form-group"><label>考官编号</label><input id="exCode" placeholder="如 E106"></div>
+        <div class="form-group"><label>姓名</label><input id="exName" placeholder="考官姓名"></div>
+        <div class="form-group"><label>所属面试组</label><select id="exGroup"></select></div>
+        <button class="btn btn-primary" onclick="addExaminer()">添加考官</button>
+      </div>
+      <table class="table">
+        <thead><tr><th>编号</th><th>姓名</th><th>所属面试组</th></tr></thead>
+        <tbody id="exTbody"></tbody>
+      </table>
+    </div>
+    <div class="card">
+      <div class="card-title">回避关系管理</div>
+      <div id="recAlert"></div>
+      <div class="form-inline" style="margin-bottom:14px">
+        <div class="form-group"><label>考官</label><select id="recExaminer"></select></div>
+        <div class="form-group"><label>考生</label><select id="recCandidate"></select></div>
+        <div class="form-group"><label>回避原因</label><input id="recReason" placeholder="如：亲属关系"></div>
+        <button class="btn btn-warning" onclick="addRecusal()">建立回避</button>
+      </div>
+      <p class="text-muted" style="margin-bottom:10px">建立回避后，该考官不能为该考生评分；已提交的评分将作废且不计入成绩。</p>
+      <table class="table">
+        <thead><tr><th>考官</th><th>考生</th><th>回避原因</th><th>操作</th></tr></thead>
+        <tbody id="recTbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ========== 成绩管理 ========== -->
+  <div id="panel-results" class="tab-panel hidden">
+    <div class="card">
+      <div class="card-title">
+        <span>成绩汇总（去掉一个最高分和一个最低分后取平均）</span>
+        <span style="display:flex;gap:12px;align-items:center">
+          <span id="pubStatus"></span>
+          <button class="btn btn-primary" id="pubBtn"></button>
+        </span>
+      </div>
+      <table class="table">
+        <thead>
+          <tr><th>准考证号</th><th>姓名</th><th>面试组</th><th>状态</th><th>有效评分</th><th>最终成绩</th><th>明细</th></tr>
+        </thead>
+        <tbody id="resTbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ========== 申诉处理 ========== -->
+  <div id="panel-appeals" class="tab-panel hidden">
+    <div class="card">
+      <div class="card-title">考生申诉处理</div>
+      <table class="table">
+        <thead>
+          <tr><th>准考证号</th><th>姓名</th><th>申诉内容</th><th>提交时间</th><th>状态</th><th style="width:320px">回复</th></tr>
+        </thead>
+        <tbody id="appTbody"></tbody>
+      </table>
+    </div>
+  </div>
+</main>
+
+<script>
+const token = sessionStorage.getItem('token');
+const user = JSON.parse(sessionStorage.getItem('user') || 'null');
+if (!token || !user) location.href = '/';
+document.getElementById('userInfo').textContent = `${user.name}（${user.code}）`;
+
+function logout() { sessionStorage.clear(); location.href = '/'; }
+
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g,
+    c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function fmtTime(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+async function api(url, options = {}) {
+  const res = await fetch(url, {
+    ...options,
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    if (res.status === 401) logout();
+    throw new Error(data.error || '请求失败');
+  }
+  return data;
+}
+
+function statusBadge(s) {
+  const map = { '待面试': 'badge-info', '已面试': 'badge-success', '缺考': 'badge-danger' };
+  return `<span class="badge ${map[s] || ''}">${s}</span>`;
+}
+
+function toast(id, msg, type) {
+  document.getElementById(id).innerHTML = msg ? `<div class="alert alert-${type}">${msg}</div>` : '';
+}
+
+function switchTab(name) {
+  document.querySelectorAll('.staff-tabs .tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.add('hidden'));
+  document.getElementById('panel-' + name).classList.remove('hidden');
+  if (name === 'candidates') loadCandidates();
+  if (name === 'examiners') { loadExaminers(); loadRecusals(); }
+  if (name === 'results') loadResults();
+  if (name === 'appeals') loadAppeals();
+}
+
+/* ================= 考生管理 ================= */
+async function loadCandidates() {
+  const d = await api('/api/staff/candidates');
+  document.getElementById('addGroup').innerHTML = d.groups.map(g => `<option value="${g.id}">${g.name}</option>`).join('');
+  document.getElementById('candTbody').innerHTML = d.candidates.map(c => {
+    const otherGroups = d.groups.filter(g => g.id !== c.group_id)
+      .map(g => `<option value="${g.id}">${g.name}</option>`).join('');
+    const absentBtn = c.status === '缺考'
+      ? `<button class="btn btn-sm btn-success" onclick="setStatus(${c.id}, '待面试')">恢复待考</button>`
+      : `<button class="btn btn-sm btn-warning" onclick="setStatus(${c.id}, '缺考')">标记缺考</button>`;
+    return `<tr>
+      <td>${escapeHtml(c.exam_number)}</td>
+      <td>${escapeHtml(c.name)}</td>
+      <td>${escapeHtml(c.position)}</td>
+      <td>${escapeHtml(c.group_name)}</td>
+      <td>${statusBadge(c.status)}</td>
+      <td>${c.score_count}</td>
+      <td class="actions">
+        ${absentBtn}
+        <select id="grp-${c.id}">${otherGroups}</select>
+        <button class="btn btn-sm" onclick="changeGroup(${c.id}, '${escapeHtml(c.name)}')">换组</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+async function addCandidate() {
+  const name = document.getElementById('addName').value.trim();
+  const exam_number = document.getElementById('addNum').value.trim();
+  const group_id = Number(document.getElementById('addGroup').value);
+  if (!name || !exam_number) return toast('addAlert', '请填写姓名和准考证号', 'error');
+  try {
+    await api('/api/staff/candidates', { method: 'POST', body: JSON.stringify({ name, exam_number, group_id }) });
+    toast('addAlert', '考生添加成功', 'success');
+    document.getElementById('addName').value = '';
+    document.getElementById('addNum').value = '';
+    loadCandidates();
+  } catch (e) { toast('addAlert', e.message, 'error'); }
+}
+
+async function setStatus(id, status) {
+  const tip = status === '缺考'
+    ? '确定将该考生标记为缺考吗？\n缺考考生不能评分，成绩按缺考处理。'
+    : '确定恢复该考生为待面试状态吗？';
+  if (!confirm(tip)) return;
+  try {
+    await api(`/api/staff/candidates/${id}/status`, { method: 'PUT', body: JSON.stringify({ status }) });
+    loadCandidates();
+  } catch (e) { alert(e.message); }
+}
+
+async function changeGroup(id, name) {
+  const gid = Number(document.getElementById('grp-' + id).value);
+  if (!confirm(`确定将考生「${name}」调整到其他面试组吗？\n\n注意：换组后该考生已产生的评分记录将被全部清除！`)) return;
+  try {
+    const r = await api(`/api/staff/candidates/${id}/group`, { method: 'PUT', body: JSON.stringify({ group_id: gid }) });
+    alert(`换组成功${r.removedScores ? `，已清除 ${r.removedScores} 条原评分记录` : ''}`);
+    loadCandidates();
+  } catch (e) { alert(e.message); }
+}
+
+/* ================= 考官与回避 ================= */
+async function loadExaminers() {
+  const d = await api('/api/staff/examiners');
+  document.getElementById('exTbody').innerHTML = d.examiners
+    .map(e => `<tr><td>${escapeHtml(e.code)}</td><td>${escapeHtml(e.name)}</td><td>${escapeHtml(e.group_name)}</td></tr>`).join('');
+  document.getElementById('exGroup').innerHTML = d.groups.map(g => `<option value="${g.id}">${g.name}</option>`).join('');
+  document.getElementById('recExaminer').innerHTML = d.examiners
+    .map(e => `<option value="${e.id}">${escapeHtml(e.code)} ${escapeHtml(e.name)}（${escapeHtml(e.group_name)}）</option>`).join('');
+  const cd = await api('/api/staff/candidates');
+  document.getElementById('recCandidate').innerHTML = cd.candidates
+    .map(c => `<option value="${c.id}">${escapeHtml(c.exam_number)} ${escapeHtml(c.name)}（${escapeHtml(c.group_name)}）</option>`).join('');
+}
+
+async function addExaminer() {
+  const code = document.getElementById('exCode').value.trim();
+  const name = document.getElementById('exName').value.trim();
+  const group_id = Number(document.getElementById('exGroup').value);
+  if (!code || !name) return toast('exAlert', '请填写考官编号和姓名', 'error');
+  try {
+    await api('/api/staff/examiners', { method: 'POST', body: JSON.stringify({ code, name, group_id }) });
+    toast('exAlert', '考官添加成功，初始密码 123456', 'success');
+    document.getElementById('exCode').value = '';
+    document.getElementById('exName').value = '';
+    loadExaminers();
+  } catch (e) { toast('exAlert', e.message, 'error'); }
+}
+
+async function loadRecusals() {
+  const d = await api('/api/staff/recusals');
+  document.getElementById('recTbody').innerHTML = d.recusals.length
+    ? d.recusals.map(r => `<tr>
+        <td>${escapeHtml(r.examiner_code)} ${escapeHtml(r.examiner_name)}</td>
+        <td>${escapeHtml(r.exam_number)} ${escapeHtml(r.candidate_name)}</td>
+        <td>${escapeHtml(r.reason) || '—'}</td>
+        <td><button class="btn btn-sm btn-danger" onclick="delRecusal(${r.id})">解除回避</button></td>
+      </tr>`).join('')
+    : '<tr><td colspan="4" class="empty-row">暂无回避关系</td></tr>';
+}
+
+async function addRecusal() {
+  const examiner_id = Number(document.getElementById('recExaminer').value);
+  const candidate_id = Number(document.getElementById('recCandidate').value);
+  const reason = document.getElementById('recReason').value.trim();
+  try {
+    const r = await api('/api/staff/recusals', { method: 'POST', body: JSON.stringify({ examiner_id, candidate_id, reason }) });
+    toast('recAlert', `回避关系已建立${r.removedScores ? '，该考官对该考生已提交的评分已作废' : ''}`, 'success');
+    document.getElementById('recReason').value = '';
+    loadRecusals();
+  } catch (e) { toast('recAlert', e.message, 'error'); }
+}
+
+async function delRecusal(id) {
+  if (!confirm('确定解除该回避关系吗？解除后该考官可正常为该考生评分。')) return;
+  try {
+    await api(`/api/staff/recusals/${id}`, { method: 'DELETE' });
+    loadRecusals();
+  } catch (e) { alert(e.message); }
+}
+
+/* ================= 成绩管理 ================= */
+async function loadResults() {
+  const d = await api('/api/staff/results');
+  const pubBtn = document.getElementById('pubBtn');
+  document.getElementById('pubStatus').innerHTML = d.published
+    ? '<span class="badge badge-success">成绩已发布</span>'
+    : '<span class="badge badge-info">成绩未发布</span>';
+  pubBtn.textContent = d.published ? '撤回发布' : '发布成绩';
+  pubBtn.className = d.published ? 'btn btn-warning' : 'btn btn-primary';
+  pubBtn.onclick = () => togglePublish(!d.published);
+
+  document.getElementById('resTbody').innerHTML = d.results.map((r, i) => {
+    const c = r.candidate;
+    let finalHtml;
+    if (r.status === '缺考') finalHtml = '<span class="badge badge-danger">缺考</span>';
+    else if (r.status === '评分不足') finalHtml = `<span class="badge badge-warning">评分不足（${r.validCount}/3）</span>`;
+    else finalHtml = `<b style="color:#c0392b;font-size:16px">${r.final.toFixed(2)}</b>`;
+    const detailBtn = r.scores.length ? `<button class="btn btn-sm" onclick="toggleDetail(${i})">评分明细</button>` : '<span class="text-muted">—</span>';
+    let detailRow = '';
+    if (r.scores.length) {
+      const rows = r.scores.map(s => `<tr class="${s.removed ? 'removed-row' : ''}">
+        <td>${escapeHtml(s.examiner_code)} ${escapeHtml(s.examiner_name)}</td>
+        <td>${s.structured}</td><td>${s.demeanor}</td><td>${s.policy}</td><td>${s.adaptability}</td>
+        <td><b>${s.total.toFixed(2)}</b></td>
+        <td>${s.removed || ''}</td>
+      </tr>`).join('');
+      detailRow = `<tr class="detail-row hidden" id="detail-${i}"><td colspan="7">
+        <table class="sub-table">
+          <thead><tr><th>考官</th><th>结构化题目(40%)</th><th>仪态表达(20%)</th><th>政策理解(20%)</th><th>应变能力(20%)</th><th>加权总分</th><th>处理</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </td></tr>`;
+    }
+    return `<tr>
+      <td>${escapeHtml(c.exam_number)}</td>
+      <td>${escapeHtml(c.name)}</td>
+      <td>${escapeHtml(c.group_name)}</td>
+      <td>${statusBadge(c.status)}</td>
+      <td>${r.validCount} 人</td>
+      <td>${finalHtml}</td>
+      <td>${detailBtn}</td>
+    </tr>${detailRow}`;
+  }).join('');
+}
+
+function toggleDetail(i) {
+  document.getElementById('detail-' + i).classList.toggle('hidden');
+}
+
+async function togglePublish(publish) {
+  const tip = publish
+    ? '确定发布成绩吗？发布后考生可查询成绩并提交申诉，评分通道将关闭。'
+    : '确定撤回发布吗？撤回后考生将无法查询成绩，评分通道重新开放。';
+  if (!confirm(tip)) return;
+  try {
+    await api('/api/staff/publish', { method: 'POST', body: JSON.stringify({ published: publish }) });
+    loadResults();
+  } catch (e) { alert(e.message); }
+}
+
+/* ================= 申诉处理 ================= */
+async function loadAppeals() {
+  const d = await api('/api/staff/appeals');
+  const tb = document.getElementById('appTbody');
+  if (!d.appeals.length) {
+    tb.innerHTML = '<tr><td colspan="6" class="empty-row">暂无申诉</td></tr>';
+    return;
+  }
+  tb.innerHTML = d.appeals.map(a => `<tr>
+    <td>${escapeHtml(a.exam_number)}</td>
+    <td>${escapeHtml(a.candidate_name)}</td>
+    <td style="max-width:280px">${escapeHtml(a.content)}</td>
+    <td>${fmtTime(a.created_at)}</td>
+    <td>${a.status === '已回复' ? '<span class="badge badge-success">已回复</span>' : '<span class="badge badge-warning">待处理</span>'}</td>
+    <td>${a.status === '已回复'
+      ? escapeHtml(a.reply)
+      : `<div style="display:flex;gap:6px">
+           <input id="reply-${a.id}" placeholder="填写回复内容" style="flex:1">
+           <button class="btn btn-sm btn-primary" onclick="replyAppeal(${a.id})">回复</button>
+         </div>`}</td>
+  </tr>`).join('');
+}
+
+async function replyAppeal(id) {
+  const reply = document.getElementById('reply-' + id).value.trim();
+  if (!reply) return alert('请填写回复内容');
+  try {
+    await api(`/api/staff/appeals/${id}/reply`, { method: 'POST', body: JSON.stringify({ reply }) });
+    loadAppeals();
+  } catch (e) { alert(e.message); }
+}
+
+loadCandidates().catch(e => alert(e.message));
+</script>
+</body>
+</html>

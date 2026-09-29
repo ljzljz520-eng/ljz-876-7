@@ -1,0 +1,12 @@
+{
+  "name": "gwy-interview-system",
+  "version": "1.0.0",
+  "description": "公务员面试打分系统（考官评分 / 考务管理 / 考生查询）",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=14"
+  }
+}

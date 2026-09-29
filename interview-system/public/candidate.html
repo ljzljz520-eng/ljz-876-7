@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>考生查询 - 公务员面试打分系统</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">公务员面试打分系统 · 考生查询</div>
+  <div class="user">
+    <span id="userInfo"></span>
+    <button class="btn btn-sm btn-light" onclick="logout()">退 出</button>
+  </div>
+</header>
+
+<main class="container" style="max-width:760px">
+  <div class="card">
+    <div class="card-title">考生信息</div>
+    <div class="info-grid">
+      <div class="item"><span class="k">姓　　名</span><span id="cName"></span></div>
+      <div class="item"><span class="k">准考证号</span><span id="cNum"></span></div>
+      <div class="item"><span class="k">报考职位</span><span id="cPos"></span></div>
+      <div class="item"><span class="k">面试组别</span><span id="cGroup"></span></div>
+    </div>
+  </div>
+
+  <div class="card score-card">
+    <div id="scoreContent"></div>
+  </div>
+
+  <div class="card hidden" id="appealCard">
+    <div class="card-title">成绩申诉</div>
+    <p class="text-muted" style="margin-bottom:10px">如对本人成绩有异议，可在成绩公布后通过下方入口提交申诉，考务部门将核实并回复。</p>
+    <textarea id="appealContent" maxlength="500" placeholder="请填写申诉理由（500字以内）"></textarea>
+    <div id="appealAlert" class="mt"></div>
+    <div style="text-align:right" class="mt">
+      <button class="btn btn-primary" onclick="submitAppeal()">提交申诉</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">我的申诉记录</div>
+    <div id="appealList"></div>
+  </div>
+</main>
+
+<script>
+const token = sessionStorage.getItem('token');
+if (!token) location.href = '/';
+
+function logout() { sessionStorage.clear(); location.href = '/'; }
+
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g,
+    c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function fmtTime(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+async function api(url, options = {}) {
+  const res = await fetch(url, {
+    ...options,
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    if (res.status === 401) logout();
+    throw new Error(data.error || '请求失败');
+  }
+  return data;
+}
+
+async function load() {
+  const d = await api('/api/candidate/result');
+  const c = d.candidate;
+  document.getElementById('userInfo').textContent = `${c.name}（考生）`;
+  document.getElementById('cName').textContent = c.name;
+  document.getElementById('cNum').textContent = c.exam_number;
+  document.getElementById('cPos').textContent = c.position;
+  document.getElementById('cGroup').textContent = c.group_name;
+
+  // 考生端只展示最终成绩，不展示任何评分明细
+  const sc = document.getElementById('scoreContent');
+  if (!d.published) {
+    sc.innerHTML = '<div style="font-size:17px;color:#909399">成绩尚未公布，请耐心等待</div>';
+  } else if (d.result_status === '缺考') {
+    sc.innerHTML = '<div class="score-big" style="color:#909399">缺　考</div><div class="score-label">本次面试未参加，按缺考处理</div>';
+  } else if (d.final == null) {
+    sc.innerHTML = '<div style="font-size:17px;color:#909399">成绩正在汇总中，请稍后查询</div>';
+  } else {
+    sc.innerHTML = `<div class="score-big">${d.final.toFixed(2)}</div><div class="score-label">面试最终成绩（满分 100 分）</div>`;
+  }
+
+  document.getElementById('appealCard').classList.toggle('hidden', !d.published);
+
+  const list = document.getElementById('appealList');
+  if (!d.appeals.length) {
+    list.innerHTML = '<p class="text-muted">暂无申诉记录</p>';
+  } else {
+    list.innerHTML = d.appeals.map(a => `
+      <div class="appeal-item">
+        <div class="head">
+          <span>${fmtTime(a.created_at)}</span>
+          <span class="badge ${a.status === '已回复' ? 'badge-success' : 'badge-warning'}">${a.status}</span>
+        </div>
+        <div>${escapeHtml(a.content)}</div>
+        ${a.reply ? `<div class="reply"><b>考务回复：</b>${escapeHtml(a.reply)}</div>` : ''}
+      </div>`).join('');
+  }
+}
+
+async function submitAppeal() {
+  const content = document.getElementById('appealContent').value.trim();
+  const box = document.getElementById('appealAlert');
+  if (!content) {
+    box.innerHTML = '<div class="alert alert-error">请填写申诉内容</div>';
+    return;
+  }
+  try {
+    await api('/api/candidate/appeal', { method: 'POST', body: JSON.stringify({ content }) });
+    document.getElementById('appealContent').value = '';
+    box.innerHTML = '<div class="alert alert-success">申诉已提交，请等待考务部门处理</div>';
+    await load();
+  } catch (e) {
+    box.innerHTML = `<div class="alert alert-error">${e.message}</div>`;
+  }
+}
+
+load().catch(e => alert(e.message));
+</script>
+</body>
+</html>

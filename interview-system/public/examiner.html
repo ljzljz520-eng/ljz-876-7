@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>考官端 - 公务员面试打分系统</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">公务员面试打分系统 · 考官端</div>
+  <div class="user">
+    <span id="userInfo"></span>
+    <button class="btn btn-sm btn-light" onclick="logout()">退出登录</button>
+  </div>
+</header>
+
+<main class="container">
+  <div id="lockNotice"></div>
+
+  <div class="card">
+    <div class="card-title">评分标准</div>
+    <div class="dim-tags" id="dimList"></div>
+    <p class="text-muted mt">各维度按 0-100 打分，系统按权重合成您的评分总分；考生最终成绩为去掉一个最高分和一个最低分后的平均分。</p>
+  </div>
+
+  <div class="card">
+    <div class="card-title">
+      <span>考生列表（<span id="groupName"></span>）</span>
+      <span id="progress" class="text-muted"></span>
+    </div>
+    <table class="table">
+      <thead>
+        <tr><th>顺序</th><th>准考证号</th><th>姓名</th><th>报考职位</th><th>状态</th><th>回避</th><th>我的评分</th><th>操作</th></tr>
+      </thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+</main>
+
+<div class="modal-mask hidden" id="modal">
+  <div class="modal">
+    <div class="modal-title">面试评分 — <span id="mName"></span>（<span id="mNum"></span>）</div>
+    <div id="mDims"></div>
+    <div class="total-preview">加权总分：<b id="mTotal">--</b> 分</div>
+    <div id="mAlert" class="mt"></div>
+    <div class="modal-actions">
+      <button class="btn" onclick="closeModal()">取 消</button>
+      <button class="btn btn-primary" onclick="submitScore()">提交评分</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const token = sessionStorage.getItem('token');
+if (!token) location.href = '/';
+
+let state = { candidates: [], dimensions: [], published: false };
+let currentCandidate = null;
+
+function logout() { sessionStorage.clear(); location.href = '/'; }
+
+async function api(url, options = {}) {
+  const res = await fetch(url, {
+    ...options,
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    if (res.status === 401) logout();
+    throw new Error(data.error || '请求失败');
+  }
+  return data;
+}
+
+function statusBadge(s) {
+  const map = { '待面试': 'badge-info', '已面试': 'badge-success', '缺考': 'badge-danger' };
+  return `<span class="badge ${map[s] || ''}">${s}</span>`;
+}
+
+async function load() {
+  const d = await api('/api/examiner/candidates');
+  state = d;
+  document.getElementById('userInfo').textContent = `${d.examiner.name}（${d.examiner.code}）· ${d.examiner.group}`;
+  document.getElementById('groupName').textContent = d.examiner.group;
+  document.getElementById('dimList').innerHTML = d.dimensions
+    .map(x => `<span class="badge badge-info">${x.label}（权重 ${x.weight * 100}%）</span>`).join('');
+  document.getElementById('lockNotice').innerHTML = d.published
+    ? '<div class="alert alert-warning">成绩已发布，评分通道已关闭，您不能再提交或修改评分。</div>' : '';
+  render();
+}
+
+function render() {
+  const list = state.candidates;
+  const scored = list.filter(c => c.my_score).length;
+  const scoreable = list.filter(c => !c.recused && c.status !== '缺考').length;
+  document.getElementById('progress').textContent = `已评 ${scored} / 应评 ${scoreable} 人`;
+  document.getElementById('tbody').innerHTML = list.map(c => {
+    let action;
+    if (c.status === '缺考') action = '<button class="btn btn-sm" disabled>缺考</button>';
+    else if (c.recused) action = '<button class="btn btn-sm" disabled>需回避</button>';
+    else if (state.published) action = '<button class="btn btn-sm" disabled>已锁定</button>';
+    else action = `<button class="btn btn-sm btn-primary" onclick="openModal(${c.id})">${c.my_score ? '修改评分' : '评　分'}</button>`;
+    return `<tr>
+      <td>${c.interview_order}</td>
+      <td>${c.exam_number}</td>
+      <td>${c.name}</td>
+      <td>${c.position}</td>
+      <td>${statusBadge(c.status)}</td>
+      <td>${c.recused ? '<span class="badge badge-danger">回避</span>' : '<span class="text-muted">—</span>'}</td>
+      <td>${c.my_score ? '<b style="color:#1f5aa8">' + c.my_score.total.toFixed(2) + '</b>' : '<span class="text-muted">未评</span>'}</td>
+      <td>${action}</td>
+    </tr>`;
+  }).join('');
+}
+
+function openModal(id) {
+  currentCandidate = state.candidates.find(c => c.id === id);
+  document.getElementById('mName').textContent = currentCandidate.name;
+  document.getElementById('mNum').textContent = currentCandidate.exam_number;
+  const s = currentCandidate.my_score || {};
+  document.getElementById('mDims').innerHTML = state.dimensions.map(d => `
+    <div class="dim-input">
+      <label>${d.label}</label>
+      <span class="weight">权重 ${d.weight * 100}%</span>
+      <input type="number" min="0" max="100" step="0.5" id="dim-${d.key}"
+             value="${s[d.key] != null ? s[d.key] : ''}" placeholder="0-100" oninput="calcLive()">
+    </div>`).join('');
+  document.getElementById('mAlert').innerHTML = '';
+  calcLive();
+  document.getElementById('modal').classList.remove('hidden');
+}
+
+function calcLive() {
+  let total = 0, ok = true;
+  state.dimensions.forEach(d => {
+    const v = document.getElementById('dim-' + d.key).value;
+    if (v === '') ok = false;
+    else total += Number(v) * d.weight;
+  });
+  document.getElementById('mTotal').textContent = ok ? (Math.round(total * 100) / 100).toFixed(2) : '--';
+}
+
+function closeModal() { document.getElementById('modal').classList.add('hidden'); }
+
+async function submitScore() {
+  const body = { candidate_id: currentCandidate.id };
+  for (const d of state.dimensions) {
+    const raw = document.getElementById('dim-' + d.key).value;
+    const v = Number(raw);
+    if (raw === '' || !Number.isFinite(v) || v < 0 || v > 100) {
+      document.getElementById('mAlert').innerHTML = '<div class="alert alert-error">请完整填写各项得分（0-100 之间的数字）</div>';
+      return;
+    }
+    body[d.key] = v;
+  }
+  try {
+    await api('/api/examiner/score', { method: 'POST', body: JSON.stringify(body) });
+    closeModal();
+    await load();
+  } catch (e) {
+    document.getElementById('mAlert').innerHTML = `<div class="alert alert-error">${e.message}</div>`;
+  }
+}
+
+document.getElementById('modal').addEventListener('click', (e) => {
+  if (e.target.id === 'modal') closeModal();
+});
+
+load().catch(e => alert(e.message));
+</script>
+</body>
+</html>

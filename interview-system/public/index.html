@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>公务员面试打分系统</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body class="login-page">
+<div class="login-wrap">
+  <div class="login-header">
+    <div class="emblem">★</div>
+    <h1>公务员面试打分系统</h1>
+    <p>CIVIL SERVICE INTERVIEW SCORING SYSTEM</p>
+  </div>
+  <div class="login-box">
+    <div class="tabs">
+      <button class="tab active" data-role="examiner">考官登录</button>
+      <button class="tab" data-role="staff">考务登录</button>
+      <button class="tab" data-role="candidate">考生查询</button>
+    </div>
+    <div id="alertBox"></div>
+
+    <form id="form-examiner" class="login-form">
+      <div class="form-group"><label>考官编号</label><input id="ex-code" placeholder="如 E101" autocomplete="username"></div>
+      <div class="form-group"><label>密码</label><input id="ex-pass" type="password" placeholder="初始密码 123456" autocomplete="current-password"></div>
+      <button class="btn btn-primary btn-block" type="submit">登 录</button>
+    </form>
+
+    <form id="form-staff" class="login-form hidden">
+      <div class="form-group"><label>考务账号</label><input id="st-code" placeholder="如 admin" autocomplete="username"></div>
+      <div class="form-group"><label>密码</label><input id="st-pass" type="password" autocomplete="current-password"></div>
+      <button class="btn btn-primary btn-block" type="submit">登 录</button>
+    </form>
+
+    <form id="form-candidate" class="login-form hidden">
+      <div class="form-group"><label>准考证号</label><input id="cd-num" placeholder="如 2026001"></div>
+      <div class="form-group"><label>姓名</label><input id="cd-name" placeholder="请输入姓名"></div>
+      <button class="btn btn-primary btn-block" type="submit">查询成绩</button>
+    </form>
+
+    <div class="demo-tip">
+      <b>演示账号</b><br>
+      考官：E101 / 123456（第一面试组）<br>
+      考务：admin / admin123<br>
+      考生：2026001 / 李文博
+    </div>
+  </div>
+</div>
+<script>
+const tabs = document.querySelectorAll('.tabs .tab');
+tabs.forEach(t => t.addEventListener('click', () => {
+  tabs.forEach(x => x.classList.remove('active'));
+  t.classList.add('active');
+  document.querySelectorAll('.login-form').forEach(f => f.classList.add('hidden'));
+  document.getElementById('form-' + t.dataset.role).classList.remove('hidden');
+  showAlert('');
+}));
+
+function showAlert(msg) {
+  document.getElementById('alertBox').innerHTML = msg ? `<div class="alert alert-error">${msg}</div>` : '';
+}
+
+async function post(url, body) {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || '请求失败');
+  return data;
+}
+
+document.getElementById('form-examiner').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  try {
+    const d = await post('/api/login', {
+      role: 'examiner',
+      code: document.getElementById('ex-code').value.trim(),
+      password: document.getElementById('ex-pass').value,
+    });
+    sessionStorage.setItem('token', d.token);
+    sessionStorage.setItem('user', JSON.stringify(d.user));
+    location.href = '/examiner.html';
+  } catch (err) { showAlert(err.message); }
+});
+
+document.getElementById('form-staff').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  try {
+    const d = await post('/api/login', {
+      role: 'staff',
+      code: document.getElementById('st-code').value.trim(),
+      password: document.getElementById('st-pass').value,
+    });
+    sessionStorage.setItem('token', d.token);
+    sessionStorage.setItem('user', JSON.stringify(d.user));
+    location.href = '/staff.html';
+  } catch (err) { showAlert(err.message); }
+});
+
+document.getElementById('form-candidate').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  try {
+    const d = await post('/api/candidate/login', {
+      exam_number: document.getElementById('cd-num').value.trim(),
+      name: document.getElementById('cd-name').value.trim(),
+    });
+    sessionStorage.setItem('token', d.token);
+    location.href = '/candidate.html';
+  } catch (err) { showAlert(err.message); }
+});
+</script>
+</body>
+</html>
